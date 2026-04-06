@@ -30,11 +30,21 @@ dotnet run
 
 3. 点击界面上的 `设置` 按钮，输入：
 
-- Bangumi 用户名
-- Bangumi Token
+- Bangumi 用户名（需要在 https://bgm.tv/settings 中手动设置用户名，请注意“用户名”与“昵称”是不同的）
+- Bangumi Token（可通过 https://next.bgm.tv/demo/access-token 生成）
 - 本地 Anime 文件夹路径
 
 4. 点击 `同步 Bangumi` 加载在看番剧列表。
+
+## 发布
+
+如果你想生成可执行文件，请运行：
+
+```bash
+dotnet publish AnimeWatchTool.csproj -c Release -o ./publish
+```
+
+生成结果会放在 `publish/` 文件夹下，里面包含 `AnimeWatchTool.exe`，可以直接分发给 Windows 用户。
 
 ## 项目结构
 
