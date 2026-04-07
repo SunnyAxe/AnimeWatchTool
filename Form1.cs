@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.ComponentModel;
 using System.Linq;
 using System.Net;
 using System.Net.Http.Headers;
@@ -15,6 +16,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Globalization;
 
 namespace AnimeWatchTool;
 
@@ -45,6 +47,11 @@ public partial class Form1 : Form
     public Form1()
     {
         InitializeComponent();
+        // 保留 Designer 中加载的自定义图标（若存在），仅在未加载时使用系统默认图标。
+        if (this.Icon == null)
+        {
+            this.Icon = System.Drawing.SystemIcons.Application;
+        }
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AnimeWatchTool/0.1 (https://github.com/yourname/animewatchtool)");
         LoadConfig();
         LoadCache();
@@ -224,6 +231,8 @@ public partial class Form1 : Form
             {
                 item.CachedEpisodeRows.Clear();
             }
+
+            ApplyCachedLocalFolderAssignments(_bangumiCache.WatchlistItems);
         }
         catch
         {
@@ -239,13 +248,68 @@ public partial class Form1 : Form
             Subject = item.Subject,
             LocalFolderName = item.LocalFolderName,
             LocalFolderPath = item.LocalFolderPath,
-            LocalEpisodes = item.LocalEpisodes,
-            Episodes = item.Episodes,
-            WatchedEpisodeIds = new HashSet<int>(item.WatchedEpisodeIds)
+            LocalEpisodes = item.LocalEpisodes.Select(ep => new LocalEpisode
+            {
+                EpisodeNumber = ep.EpisodeNumber,
+                FilePath = ep.FilePath,
+                DisplayName = ep.DisplayName
+            }).ToList(),
+            Episodes = item.Episodes.Select(ep => new BangumiEpisode
+            {
+                Id = ep.Id,
+                Sort = ep.Sort,
+                Name = ep.Name,
+                Airdate = ep.Airdate
+            }).ToList(),
+            WatchedEpisodeIds = new HashSet<int>(item.WatchedEpisodeIds),
+            WatchedEpisodeTimes = new Dictionary<int, long>(item.WatchedEpisodeTimes),
+            EpisodeAirdateSyncAttempted = item.EpisodeAirdateSyncAttempted
         }).ToList();
+
+        _bangumiCache.LocalFolderAssignments = _watchlist
+            .Where(item => !string.IsNullOrWhiteSpace(item.LocalFolderPath) && item.LocalEpisodes.Any())
+            .ToDictionary(
+                item => item.Subject.Id,
+                item => new LocalFolderAssignment
+                {
+                    SubjectId = item.Subject.Id,
+                    FolderName = item.LocalFolderName,
+                    FolderPath = item.LocalFolderPath,
+                    LocalEpisodes = item.LocalEpisodes.Select(ep => new LocalEpisode
+                    {
+                        EpisodeNumber = ep.EpisodeNumber,
+                        FilePath = ep.FilePath,
+                        DisplayName = ep.DisplayName
+                    }).ToList()
+                });
 
         var path = Path.Combine(GetWorkspaceRoot(), CacheFileName);
         File.WriteAllText(path, JsonSerializer.Serialize(_bangumiCache, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+    }
+
+    private void ApplyCachedLocalFolderAssignments(IEnumerable<WatchlistItem> items)
+    {
+        if (_bangumiCache.LocalFolderAssignments == null || !_bangumiCache.LocalFolderAssignments.Any())
+        {
+            return;
+        }
+
+        foreach (var item in items)
+        {
+            if (!_bangumiCache.LocalFolderAssignments.TryGetValue(item.Subject.Id, out var assignment))
+            {
+                continue;
+            }
+
+            item.LocalFolderName = assignment.FolderName;
+            item.LocalFolderPath = assignment.FolderPath;
+            item.LocalEpisodes = assignment.LocalEpisodes?.Select(ep => new LocalEpisode
+            {
+                EpisodeNumber = ep.EpisodeNumber,
+                FilePath = ep.FilePath,
+                DisplayName = ep.DisplayName
+            }).ToList() ?? new List<LocalEpisode>();
+        }
     }
 
     private void btnSaveConfig_Click(object sender, EventArgs e)
@@ -285,11 +349,8 @@ public partial class Form1 : Form
         txtAccessToken.Text = _config.AccessToken;
         SaveConfig();
 
-        if (!string.Equals(oldLocalFolder?.Trim(), newLocalFolder, StringComparison.OrdinalIgnoreCase))
-        {
-            await ScanLocalFolderAsync();
-            ShowStatus("本地目录已更新并扫描完成。点击同步以刷新 Bangumi 状态。");
-        }
+        await ScanLocalFolderAsync();
+        ShowStatus("本地目录已扫描完成。点击同步以刷新 Bangumi 状态。");
 
         if (isSwitchAccount)
         {
@@ -310,6 +371,162 @@ public partial class Form1 : Form
         await FetchBangumiAsync(true);
     }
 
+    private async void btnSetLocalFolder_Click(object sender, EventArgs e)
+    {
+        if (dgvSeries.SelectedRows.Count == 0 || dgvSeries.SelectedRows[0].DataBoundItem is not WatchlistItem selectedItem)
+        {
+            MessageBox.Show(this, "请先在番剧列表中选择一个条目。", "未选择番剧", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        using var browser = new FolderBrowserDialog();
+        if (Directory.Exists(selectedItem.LocalFolderPath))
+        {
+            browser.SelectedPath = selectedItem.LocalFolderPath;
+        }
+        else if (Directory.Exists(_config.LocalFolder))
+        {
+            browser.SelectedPath = _config.LocalFolder;
+        }
+
+        if (browser.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var folder = browser.SelectedPath;
+        var episodes = ScanLocalEpisodesInFolder(folder);
+        if (!episodes.Any())
+        {
+            ShowStatus("该文件夹中未检测到任何可识别的视频集数，请选择正确的番剧目录。");
+            return;
+        }
+
+        selectedItem.LocalFolderName = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        selectedItem.LocalFolderPath = folder;
+        selectedItem.LocalEpisodes = episodes;
+        selectedItem.CachedEpisodeRows.Clear();
+        SaveCache();
+        UpdateSeriesGrid(selectedItem.Subject.Id);
+        RefreshSeriesRowDisplay(selectedItem);
+        dgvSeries.Refresh();
+        await LoadEpisodeRowsAsync(selectedItem);
+        ShowStatus($"已为 {selectedItem.DisplayTitle} 指定本地目录并重新扫描。\n{episodes.Count} 集已加载。");
+    }
+
+    private async void btnClearLocalFolder_Click(object sender, EventArgs e)
+    {
+        if (dgvSeries.SelectedRows.Count == 0 || dgvSeries.SelectedRows[0].DataBoundItem is not WatchlistItem selectedItem)
+        {
+            MessageBox.Show(this, "请先在番剧列表中选择一个条目。", "未选择番剧", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        selectedItem.LocalFolderName = string.Empty;
+        selectedItem.LocalFolderPath = string.Empty;
+        selectedItem.LocalEpisodes = new List<LocalEpisode>();
+        selectedItem.CachedEpisodeRows.Clear();
+        SaveCache();
+        UpdateSeriesGrid(selectedItem.Subject.Id);
+        RefreshSeriesRowDisplay(selectedItem);
+        await LoadEpisodeRowsAsync(selectedItem);
+        ShowStatus($"已清除 {selectedItem.DisplayTitle} 的本地目录设置，并重新加载该条目。");
+    }
+
+    private LocalSeries FindLocalSeriesByTitle(WatchlistItem item)
+    {
+        var watchKey = NormalizeTitle(item.Subject.NameCn ?? item.Subject.Name);
+        if (string.IsNullOrWhiteSpace(watchKey))
+        {
+            return null;
+        }
+
+        var match = _localSeries.FirstOrDefault(local =>
+            NormalizeTitle(local.FolderName) == watchKey ||
+            NormalizeTitle(local.FolderName).Contains(watchKey) ||
+            watchKey.Contains(NormalizeTitle(local.FolderName)));
+
+        if (match != null)
+        {
+            return match;
+        }
+
+        var rootFolder = _config.LocalFolder.Trim();
+        if (string.IsNullOrWhiteSpace(rootFolder) || !Directory.Exists(rootFolder))
+        {
+            return null;
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(rootFolder, "*", SearchOption.AllDirectories))
+        {
+            var normalizedDirName = NormalizeTitle(Path.GetFileName(directory) ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(normalizedDirName))
+            {
+                continue;
+            }
+
+            if (normalizedDirName == watchKey || normalizedDirName.Contains(watchKey) || watchKey.Contains(normalizedDirName))
+            {
+                var episodes = ScanLocalEpisodesInFolder(directory);
+                if (episodes.Any())
+                {
+                    return new LocalSeries
+                    {
+                        FolderName = Path.GetFileName(directory) ?? string.Empty,
+                        FolderPath = directory,
+                        Episodes = episodes
+                    };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private async void btnMatchByTitle_Click(object sender, EventArgs e)
+    {
+        if (_localSeries.Count == 0)
+        {
+            await ScanLocalFolderAsync();
+            if (_localSeries.Count == 0)
+            {
+                ShowStatus("本地目录尚未扫描或未发现可用目录。请先在设置中确认本地根目录后重试。");
+                return;
+            }
+        }
+
+        var matchedItems = new List<WatchlistItem>();
+        foreach (var item in _watchlist.Where(i => !i.HasLocal))
+        {
+            var match = FindLocalSeriesByTitle(item);
+            if (match == null)
+            {
+                continue;
+            }
+
+            item.LocalFolderName = match.FolderName;
+            item.LocalFolderPath = match.FolderPath;
+            item.LocalEpisodes = match.Episodes;
+            item.CachedEpisodeRows.Clear();
+            matchedItems.Add(item);
+        }
+
+        if (!matchedItems.Any())
+        {
+            ShowStatus("未找到可按片名匹配的未匹配番剧，本地匹配结果保持不变。");
+            return;
+        }
+
+        SaveCache();
+        UpdateSeriesGrid();
+
+        if (dgvSeries.SelectedRows.Count > 0 && dgvSeries.SelectedRows[0].DataBoundItem is WatchlistItem selectedItem && matchedItems.Contains(selectedItem))
+        {
+            await LoadEpisodeRowsAsync(selectedItem);
+        }
+
+        ShowStatus($"已按片名自动匹配 {matchedItems.Count} 个未匹配番剧的本地目录。已匹配条目将保持已匹配状态。 ");
+    }
 
     private Task ScanLocalFolderAsync(bool showStatus = true)
     {
@@ -321,36 +538,29 @@ public partial class Form1 : Form
         }
 
         _localSeries.Clear();
-        var allDirectories = Directory.EnumerateDirectories(folder, "*", SearchOption.AllDirectories)
-            .Prepend(folder);
-        foreach (var directory in allDirectories)
+        var allFiles = Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories)
+            .Where(f => new[] { ".mp4", ".mkv", ".avi", ".flv", ".wmv", ".mov", ".rmvb" }
+                .Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .ToList();
+
+        var groups = allFiles.GroupBy(file => GetTopFolderPath(folder, Path.GetDirectoryName(file)!));
+        foreach (var group in groups)
         {
-            var folderName = Path.GetFileName(directory) ?? directory;
-            var episodes = new List<LocalEpisode>();
-            foreach (var file in Directory.EnumerateFiles(directory, "*.*", SearchOption.TopDirectoryOnly)
-                .Where(f => new[] { ".mp4", ".mkv", ".avi", ".flv", ".wmv", ".mov", ".rmvb" }
-                    .Contains(Path.GetExtension(f).ToLowerInvariant())))
+            var folderPath = group.Key;
+            var folderName = Path.GetFileName(folderPath) ?? folderPath;
+            var episodes = ScanLocalEpisodesInFolder(folderPath);
+
+            if (!episodes.Any())
             {
-                var episodeNumber = ExtractEpisodeNumber(Path.GetFileName(file), out var label);
-                if (episodeNumber <= 0) continue;
-                episodes.Add(new LocalEpisode
-                {
-                    EpisodeNumber = episodeNumber,
-                    FilePath = file,
-                    DisplayName = $"第 {episodeNumber} 集 - {label}"
-                });
+                continue;
             }
 
-            if (episodes.Any())
+            _localSeries.Add(new LocalSeries
             {
-                episodes.Sort((a, b) => a.EpisodeNumber.CompareTo(b.EpisodeNumber));
-                _localSeries.Add(new LocalSeries
-                {
-                    FolderName = folderName,
-                    FolderPath = directory,
-                    Episodes = episodes
-                });
-            }
+                FolderName = folderName,
+                FolderPath = folderPath,
+                Episodes = episodes
+            });
         }
 
         MatchLocalAndBangumiSeries();
@@ -361,6 +571,46 @@ public partial class Form1 : Form
         }
 
         return Task.CompletedTask;
+    }
+
+    private static string GetTopFolderPath(string rootFolder, string directory)
+    {
+        var relative = Path.GetRelativePath(rootFolder, directory);
+        if (string.IsNullOrWhiteSpace(relative) || relative == ".")
+        {
+            return rootFolder;
+        }
+
+        var parts = relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 0 ? rootFolder : Path.Combine(rootFolder, parts[0]);
+    }
+
+    private static List<LocalEpisode> ScanLocalEpisodesInFolder(string folder)
+    {
+        var files = Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories)
+            .Where(f => new[] { ".mp4", ".mkv", ".avi", ".flv", ".wmv", ".mov", ".rmvb" }
+                .Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .ToList();
+
+        var episodes = new List<LocalEpisode>();
+        foreach (var file in files)
+        {
+            var episodeNumber = ExtractEpisodeNumber(Path.GetFileName(file), out var label);
+            if (episodeNumber <= 0)
+            {
+                continue;
+            }
+
+            episodes.Add(new LocalEpisode
+            {
+                EpisodeNumber = episodeNumber,
+                FilePath = file,
+                DisplayName = $"第 {episodeNumber} 集 - {label}"
+            });
+        }
+
+        episodes.Sort((a, b) => a.EpisodeNumber.CompareTo(b.EpisodeNumber));
+        return episodes;
     }
 
     private async Task FetchBangumiAsync(bool saveConfigAfterSync)
@@ -392,7 +642,24 @@ public partial class Form1 : Form
                 {
                     item.Episodes = cachedItem.Episodes;
                     item.WatchedEpisodeIds = new HashSet<int>(cachedItem.WatchedEpisodeIds);
+                    item.WatchedEpisodeTimes = new Dictionary<int, long>(cachedItem.WatchedEpisodeTimes);
+                    item.EpisodeAirdateSyncAttempted = cachedItem.EpisodeAirdateSyncAttempted;
                     item.WatchedStatusLoaded = cachedItem.WatchedStatusLoaded || item.WatchedEpisodeIds.Any();
+                    item.LocalFolderName = cachedItem.LocalFolderName;
+                    item.LocalFolderPath = cachedItem.LocalFolderPath;
+                    item.LocalEpisodes = cachedItem.LocalEpisodes ?? new List<LocalEpisode>();
+                }
+
+                if (_bangumiCache.LocalFolderAssignments != null && _bangumiCache.LocalFolderAssignments.TryGetValue(subject.Id, out var folderAssignment))
+                {
+                    item.LocalFolderName = folderAssignment.FolderName;
+                    item.LocalFolderPath = folderAssignment.FolderPath;
+                    item.LocalEpisodes = folderAssignment.LocalEpisodes?.Select(ep => new LocalEpisode
+                    {
+                        EpisodeNumber = ep.EpisodeNumber,
+                        FilePath = ep.FilePath,
+                        DisplayName = ep.DisplayName
+                    }).ToList() ?? new List<LocalEpisode>();
                 }
 
                 _watchlist.Add(item);
@@ -503,7 +770,7 @@ public partial class Form1 : Form
     {
         try
         {
-            using var response = await GetLoggedAsync($"subjects/{subjectId}/episodes");
+            using var response = await GetLoggedAsync($"episodes?subject_id={subjectId}&limit=1000");
             if (response.StatusCode == HttpStatusCode.NotFound || response.StatusCode == HttpStatusCode.BadRequest)
             {
                 return await FetchBangumiEpisodesFromWebAsync(subjectId);
@@ -524,7 +791,8 @@ public partial class Form1 : Form
                 var id = node.GetProperty("id").GetInt32();
                 var sort = node.GetProperty("sort").GetInt32();
                 var name = node.TryGetProperty("name", out var nameNode) ? nameNode.GetString() ?? string.Empty : string.Empty;
-                result.Add(new BangumiEpisode { Id = id, Sort = sort, Name = name });
+                var airdate = node.TryGetProperty("airdate", out var adNode) ? adNode.GetString() ?? string.Empty : string.Empty;
+                result.Add(new BangumiEpisode { Id = id, Sort = sort, Name = name, Airdate = airdate });
             }
 
             if (result.Count == 0)
@@ -631,10 +899,12 @@ public partial class Form1 : Form
             try
             {
                 LogHttp($"Sync watched status for subject {item.Subject.Id}");
-                var newWatchedIds = await FetchWatchedEpisodeIdsAsync(item.Subject.Id);
-                if (!item.WatchedEpisodeIds.SetEquals(newWatchedIds))
+                var watchedStatusMap = await FetchWatchedEpisodeStatusMapAsync(item.Subject.Id);
+                var newWatchedIds = watchedStatusMap.Keys.ToHashSet();
+                if (!item.WatchedEpisodeIds.SetEquals(newWatchedIds) || !DictionaryEquals(item.WatchedEpisodeTimes, watchedStatusMap))
                 {
                     item.WatchedEpisodeIds = new HashSet<int>(newWatchedIds);
+                    item.WatchedEpisodeTimes = watchedStatusMap;
                     item.CachedEpisodeRows.Clear();
                     anyChanged = true;
                 }
@@ -663,8 +933,9 @@ public partial class Form1 : Form
         try
         {
             ShowStatus($"正在加载 {item.DisplayTitle} 的已看状态...");
-            var watchedIds = await FetchWatchedEpisodeIdsAsync(item.Subject.Id);
-            item.WatchedEpisodeIds = new HashSet<int>(watchedIds);
+            var watchedStatusMap = await FetchWatchedEpisodeStatusMapAsync(item.Subject.Id);
+            item.WatchedEpisodeIds = watchedStatusMap.Keys.ToHashSet();
+            item.WatchedEpisodeTimes = watchedStatusMap;
             item.WatchedStatusLoaded = true;
             item.CachedEpisodeRows.Clear();
             SaveCache();
@@ -677,9 +948,9 @@ public partial class Form1 : Form
         }
     }
 
-    private async Task<HashSet<int>> FetchWatchedEpisodeIdsAsync(int subjectId)
+    private async Task<Dictionary<int, long>> FetchWatchedEpisodeStatusMapAsync(int subjectId)
     {
-        var result = new HashSet<int>();
+        var result = new Dictionary<int, long>();
         var offset = 0;
         const int limit = 100;
 
@@ -724,7 +995,25 @@ public partial class Form1 : Form
                     continue;
                 }
 
-                result.Add(idNode.GetInt32());
+                var episodeId = idNode.GetInt32();
+                var watchedAtUnix = 0L;
+                if (node.TryGetProperty("updated_at", out var updatedAtNode))
+                {
+                    if (updatedAtNode.ValueKind == JsonValueKind.Number)
+                    {
+                        watchedAtUnix = updatedAtNode.GetInt64();
+                    }
+                    else if (updatedAtNode.ValueKind == JsonValueKind.String)
+                    {
+                        var raw = updatedAtNode.GetString() ?? string.Empty;
+                        if (long.TryParse(raw, out var parsedUnix))
+                        {
+                            watchedAtUnix = parsedUnix;
+                        }
+                    }
+                }
+
+                result[episodeId] = watchedAtUnix;
             }
 
             var total = document.RootElement.TryGetProperty("total", out var totalNode) ? totalNode.GetInt32() : 0;
@@ -742,15 +1031,17 @@ public partial class Form1 : Form
     {
         foreach (var item in _watchlist)
         {
+            if (!string.IsNullOrWhiteSpace(item.LocalFolderPath) && Directory.Exists(item.LocalFolderPath) && item.LocalEpisodes.Any())
+            {
+                continue;
+            }
+
+            item.CachedEpisodeRows.Clear();
             item.LocalFolderName = string.Empty;
             item.LocalFolderPath = string.Empty;
             item.LocalEpisodes = new List<LocalEpisode>();
 
-            var watchKey = NormalizeTitle(item.Subject.NameCn ?? item.Subject.Name);
-            var match = _localSeries.FirstOrDefault(local =>
-                NormalizeTitle(local.FolderName) == watchKey ||
-                NormalizeTitle(local.FolderName).Contains(watchKey) ||
-                watchKey.Contains(NormalizeTitle(local.FolderName)));
+            var match = FindLocalSeriesByTitle(item);
 
             if (match != null)
             {
@@ -761,18 +1052,64 @@ public partial class Form1 : Form
         }
     }
 
-    private void UpdateSeriesGrid()
+    private void UpdateSeriesGrid(int? selectedSubjectId = null)
     {
         _suppressSeriesSelectionChanged = true;
-        dgvSeries.DataSource = null;
-        dgvSeries.DataSource = GetFilteredSeries()
+        var seriesList = GetFilteredSeries()
             .OrderByDescending(item => item.HasLocal)
             .ThenBy(item => item.DisplayTitle)
             .ToList();
-        dgvSeries.ClearSelection();
-        dgvSeries.CurrentCell = null;
+
+        dgvSeries.DataSource = null;
+        dgvSeries.DataSource = seriesList;
+
+        if (selectedSubjectId.HasValue)
+        {
+            var rowIndex = seriesList.FindIndex(item => item.Subject.Id == selectedSubjectId.Value);
+            if (rowIndex >= 0 && rowIndex < dgvSeries.Rows.Count)
+            {
+                dgvSeries.ClearSelection();
+                dgvSeries.CurrentCell = dgvSeries.Rows[rowIndex].Cells[0];
+                dgvSeries.Rows[rowIndex].Selected = true;
+                dgvSeries.Refresh();
+            }
+            else
+            {
+                dgvSeries.ClearSelection();
+                dgvSeries.CurrentCell = null;
+            }
+        }
+        else
+        {
+            dgvSeries.ClearSelection();
+            dgvSeries.CurrentCell = null;
+        }
+
         dgvEpisodes.DataSource = null;
+        dgvSeries.Refresh();
         _suppressSeriesSelectionChanged = false;
+    }
+
+    private void RefreshSeriesRowDisplay(WatchlistItem item)
+    {
+        if (dgvSeries.DataSource == null)
+        {
+            return;
+        }
+
+        foreach (DataGridViewRow row in dgvSeries.Rows)
+        {
+            if (row.DataBoundItem is not WatchlistItem rowItem || rowItem.Subject.Id != item.Subject.Id)
+            {
+                continue;
+            }
+
+            row.Cells[colSeriesLocalCount.Index].Value = item.LocalMatchCount;
+            row.Cells[colSeriesLocalFolder.Index].Value = item.LocalFolderDisplay;
+            dgvSeries.InvalidateRow(row.Index);
+            dgvSeries.Refresh();
+            return;
+        }
     }
 
     private IEnumerable<WatchlistItem> GetFilteredSeries()
@@ -844,12 +1181,19 @@ public partial class Form1 : Form
 
     private async Task LoadEpisodeRowsAsync(WatchlistItem item)
     {
-        if (!item.EpisodesLoaded)
+        var needInitialLoad = !item.EpisodesLoaded;
+        var needAirdateRefresh = item.EpisodesLoaded
+            && !item.EpisodeAirdateSyncAttempted
+            && item.Episodes.Any()
+            && item.Episodes.All(ep => string.IsNullOrWhiteSpace(ep.Airdate));
+
+        if (needInitialLoad || needAirdateRefresh)
         {
             ShowStatus("正在加载番剧集数...");
             try
             {
                 item.Episodes = (await FetchBangumiEpisodesAsync(item.Subject.Id)).ToList();
+                item.EpisodeAirdateSyncAttempted = true;
                 SaveCache();
             }
             catch (Exception ex)
@@ -889,7 +1233,11 @@ public partial class Form1 : Form
                 EpisodeNumber = ep.Sort,
                 Title = string.IsNullOrWhiteSpace(ep.Name) ? $"第{ep.Sort}集" : ep.Name,
                 LocalFile = localMap.TryGetValue(ep.Sort, out var file) ? file.FilePath : string.Empty,
-                IsWatched = item.WatchedEpisodeIds.Contains(ep.Id)
+                IsWatched = item.WatchedEpisodeIds.Contains(ep.Id),
+                Airdate = ep is BangumiEpisode be ? be.Airdate : string.Empty,
+                WatchedAt = item.WatchedEpisodeTimes.TryGetValue(ep.Id, out var watchedAtUnix)
+                    ? UnixTimestampToDisplay(watchedAtUnix)
+                    : string.Empty
             }).ToList()
             : item.LocalEpisodes.OrderBy(e => e.EpisodeNumber).Select(ep => new EpisodeRow
             {
@@ -898,6 +1246,9 @@ public partial class Form1 : Form
                 Title = ep.DisplayName,
                 LocalFile = ep.FilePath,
                 IsWatched = false
+                ,
+                Airdate = string.Empty,
+                WatchedAt = string.Empty
             }).ToList();
     }
 
@@ -910,10 +1261,11 @@ public partial class Form1 : Form
 
         try
         {
-            var watchedIds = await FetchWatchedEpisodeIdsAsync(item.Subject.Id);
-            var newWatchedIds = new HashSet<int>(watchedIds);
-            var changed = !item.WatchedEpisodeIds.SetEquals(newWatchedIds);
+            var watchedStatusMap = await FetchWatchedEpisodeStatusMapAsync(item.Subject.Id);
+            var newWatchedIds = watchedStatusMap.Keys.ToHashSet();
+            var changed = !item.WatchedEpisodeIds.SetEquals(newWatchedIds) || !DictionaryEquals(item.WatchedEpisodeTimes, watchedStatusMap);
             item.WatchedEpisodeIds = newWatchedIds;
+            item.WatchedEpisodeTimes = watchedStatusMap;
             item.WatchedStatusLoaded = true;
 
             if (changed)
@@ -947,7 +1299,9 @@ public partial class Form1 : Form
 
     private async Task PrefetchMissingEpisodesAsync()
     {
-        var itemsToPrefetch = _watchlist.Where(item => !item.EpisodesLoaded).ToList();
+        var itemsToPrefetch = _watchlist
+            .Where(item => !item.EpisodesLoaded || (!item.EpisodeAirdateSyncAttempted && item.Episodes.Any() && item.Episodes.All(ep => string.IsNullOrWhiteSpace(ep.Airdate))))
+            .ToList();
         if (!itemsToPrefetch.Any())
         {
             return;
@@ -959,6 +1313,7 @@ public partial class Form1 : Form
             try
             {
                 item.Episodes = (await FetchBangumiEpisodesAsync(item.Subject.Id)).ToList();
+                item.EpisodeAirdateSyncAttempted = true;
                 SaveCache();
             }
             catch
@@ -978,16 +1333,33 @@ public partial class Form1 : Form
             {
                 if (episode.IsWatched)
                 {
-                    row.DefaultCellStyle.BackColor = Color.LightGreen;
-                    row.DefaultCellStyle.ForeColor = Color.Black;
+                    row.DefaultCellStyle.BackColor = Color.SteelBlue;
+                    row.DefaultCellStyle.ForeColor = Color.White;
                 }
-                else if (!episode.CanPlay)
+                else if (!string.IsNullOrWhiteSpace(episode.Airdate) && DateTime.TryParseExact(episode.Airdate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var airDate))
                 {
-                    row.DefaultCellStyle.BackColor = Color.LightGray;
-                    row.DefaultCellStyle.ForeColor = Color.DarkGray;
+                    var today = DateTime.Today;
+                    var tomorrow = today.AddDays(1);
+                    if (airDate.Date == tomorrow)
+                    {
+                        row.DefaultCellStyle.BackColor = Color.LightGreen;
+                        row.DefaultCellStyle.ForeColor = Color.Black;
+                    }
+                    else if (airDate.Date > tomorrow)
+                    {
+                        row.DefaultCellStyle.BackColor = Color.LightGray;
+                        row.DefaultCellStyle.ForeColor = Color.Black;
+                    }
+                    else
+                    {
+                        // today or past airdate都算已播
+                        row.DefaultCellStyle.BackColor = Color.LightBlue;
+                        row.DefaultCellStyle.ForeColor = Color.Black;
+                    }
                 }
                 else
                 {
+                    // 仅在确实无播出时间时显示白色
                     row.DefaultCellStyle.BackColor = Color.White;
                     row.DefaultCellStyle.ForeColor = Color.Black;
                 }
@@ -1119,6 +1491,46 @@ public partial class Form1 : Form
         return normalized;
     }
 
+    private static string UnixTimestampToDisplay(long unixTimestamp)
+    {
+        if (unixTimestamp <= 0)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(unixTimestamp).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool DictionaryEquals(Dictionary<int, long> left, Dictionary<int, long> right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left == null || right == null || left.Count != right.Count)
+        {
+            return false;
+        }
+
+        foreach (var pair in left)
+        {
+            if (!right.TryGetValue(pair.Key, out var value) || value != pair.Value)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private async Task<(bool Success, string ErrorMessage)> MarkEpisodeAsWatchedAsync(int subjectId, int episodeId)
     {
         var token = txtAccessToken.Text.Trim();
@@ -1160,6 +1572,15 @@ public partial class Form1 : Form
     {
         public string Username { get; set; } = string.Empty;
         public List<WatchlistItem> WatchlistItems { get; set; } = new();
+        public Dictionary<int, LocalFolderAssignment> LocalFolderAssignments { get; set; } = new();
+    }
+
+    private sealed class LocalFolderAssignment
+    {
+        public int SubjectId { get; set; }
+        public string FolderName { get; set; } = string.Empty;
+        public string FolderPath { get; set; } = string.Empty;
+        public List<LocalEpisode> LocalEpisodes { get; set; } = new();
     }
 
     private sealed class LocalSeries
@@ -1169,22 +1590,111 @@ public partial class Form1 : Form
         public List<LocalEpisode> Episodes { get; set; } = new();
     }
 
-    private sealed class WatchlistItem
+    private sealed class WatchlistItem : INotifyPropertyChanged
     {
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        private string _localFolderName = string.Empty;
+        private string _localFolderPath = string.Empty;
+        private List<LocalEpisode> _localEpisodes = new();
+        private List<BangumiEpisode> _episodes = new();
+        private List<EpisodeRow> _cachedEpisodeRows = new();
+        private HashSet<int> _watchedEpisodeIds = new();
+        private Dictionary<int, long> _watchedEpisodeTimes = new();
+
         public BangumiSubject Subject { get; set; } = new BangumiSubject();
-        public string LocalFolderName { get; set; } = string.Empty;
-        public string LocalFolderPath { get; set; } = string.Empty;
-        public List<LocalEpisode> LocalEpisodes { get; set; } = new();
-        public List<BangumiEpisode> Episodes { get; set; } = new();
+        public string LocalFolderName
+        {
+            get => _localFolderName;
+            set
+            {
+                if (_localFolderName == value)
+                {
+                    return;
+                }
+
+                _localFolderName = value ?? string.Empty;
+                OnPropertyChanged(nameof(LocalFolderName));
+                OnPropertyChanged(nameof(LocalFolderDisplay));
+            }
+        }
+
+        public string LocalFolderPath
+        {
+            get => _localFolderPath;
+            set
+            {
+                if (_localFolderPath == value)
+                {
+                    return;
+                }
+
+                _localFolderPath = value ?? string.Empty;
+                OnPropertyChanged(nameof(LocalFolderPath));
+            }
+        }
+
+        public List<LocalEpisode> LocalEpisodes
+        {
+            get => _localEpisodes;
+            set
+            {
+                if (_localEpisodes == value)
+                {
+                    return;
+                }
+
+                _localEpisodes = value ?? new List<LocalEpisode>();
+                _cachedEpisodeRows.Clear();
+                OnPropertyChanged(nameof(LocalEpisodes));
+                OnPropertyChanged(nameof(HasLocal));
+                OnPropertyChanged(nameof(LocalMatchCount));
+            }
+        }
+
+        public List<BangumiEpisode> Episodes
+        {
+            get => _episodes;
+            set
+            {
+                _episodes = value ?? new List<BangumiEpisode>();
+                OnPropertyChanged(nameof(Episodes));
+                OnPropertyChanged(nameof(EpisodesLoaded));
+            }
+        }
+
         [JsonIgnore]
-        public List<EpisodeRow> CachedEpisodeRows { get; set; } = new();
-        public HashSet<int> WatchedEpisodeIds { get; set; } = new();
+        public List<EpisodeRow> CachedEpisodeRows
+        {
+            get => _cachedEpisodeRows;
+            set => _cachedEpisodeRows = value ?? new List<EpisodeRow>();
+        }
+
+        public HashSet<int> WatchedEpisodeIds
+        {
+            get => _watchedEpisodeIds;
+            set => _watchedEpisodeIds = value ?? new HashSet<int>();
+        }
+
+        public Dictionary<int, long> WatchedEpisodeTimes
+        {
+            get => _watchedEpisodeTimes;
+            set => _watchedEpisodeTimes = value ?? new Dictionary<int, long>();
+        }
+
+        public bool EpisodeAirdateSyncAttempted { get; set; }
+
         public bool WatchedStatusLoaded { get; set; }
         public bool HasLocal => LocalEpisodes.Count > 0;
         public bool EpisodesLoaded => Episodes.Count > 0;
         public string DisplayTitle => string.IsNullOrWhiteSpace(Subject.NameCn) ? Subject.Name : Subject.NameCn;
         public int LocalMatchCount => LocalEpisodes.Count;
         public string LocalFolderDisplay => string.IsNullOrWhiteSpace(LocalFolderName) ? "未匹配" : LocalFolderName;
+
+        private void OnPropertyChanged(string propertyName)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
     }
 
     private sealed class LocalEpisode
@@ -1200,6 +1710,8 @@ public partial class Form1 : Form
         public int EpisodeNumber { get; set; }
         public string Title { get; set; } = string.Empty;
         public string LocalFile { get; set; } = string.Empty;
+        public string Airdate { get; set; } = string.Empty;
+        public string WatchedAt { get; set; } = string.Empty;
         public bool CanPlay => !string.IsNullOrWhiteSpace(LocalFile);
         public bool HasBangumiId => EpisodeId > 0;
         public bool IsWatched { get; set; }
@@ -1217,5 +1729,6 @@ public partial class Form1 : Form
         public int Id { get; set; }
         public int Sort { get; set; }
         public string Name { get; set; } = string.Empty;
+        public string Airdate { get; set; } = string.Empty;
     }
 }

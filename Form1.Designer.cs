@@ -13,9 +13,13 @@ partial class Form1
     private System.Windows.Forms.Button btnChangeUser;
     private System.Windows.Forms.Button btnConfigureUser;
     private System.Windows.Forms.Button btnSyncBangumi;
+    private System.Windows.Forms.Button btnSetLocalFolder;
+    private System.Windows.Forms.Button btnClearLocalFolder;
+    private System.Windows.Forms.Button btnMatchByTitle;
     private System.Windows.Forms.SplitContainer splitContainerMain;
     private System.Windows.Forms.Panel panelSeriesHeader;
-    private System.Windows.Forms.TableLayoutPanel topBarLayout;
+    private System.Windows.Forms.TableLayoutPanel buttonBarLayout;
+    private System.Windows.Forms.TableLayoutPanel searchBarLayout;
     private System.Windows.Forms.Label labelSeriesSearch;
     private System.Windows.Forms.TextBox txtSeriesSearch;
     private System.Windows.Forms.Label labelSeriesFilter;
@@ -30,6 +34,8 @@ partial class Form1
     private System.Windows.Forms.DataGridViewTextBoxColumn colSeriesLocalFolder;
     private System.Windows.Forms.DataGridViewTextBoxColumn colEpisodeNumber;
     private System.Windows.Forms.DataGridViewTextBoxColumn colEpisodeTitle;
+    private System.Windows.Forms.DataGridViewTextBoxColumn colEpisodeWatchedAt;
+    private System.Windows.Forms.DataGridViewTextBoxColumn colEpisodeAirdate;
     private System.Windows.Forms.DataGridViewButtonColumn colEpisodePlay;
     private System.Windows.Forms.DataGridViewButtonColumn colEpisodeMarkWatched;
 
@@ -54,9 +60,13 @@ partial class Form1
         this.btnChangeUser = new System.Windows.Forms.Button();
         this.btnConfigureUser = new System.Windows.Forms.Button();
         this.btnSyncBangumi = new System.Windows.Forms.Button();
+        this.btnSetLocalFolder = new System.Windows.Forms.Button();
+        this.btnClearLocalFolder = new System.Windows.Forms.Button();
+        this.btnMatchByTitle = new System.Windows.Forms.Button();
         this.splitContainerMain = new System.Windows.Forms.SplitContainer();
         this.panelSeriesHeader = new System.Windows.Forms.Panel();
-        this.topBarLayout = new System.Windows.Forms.TableLayoutPanel();
+        this.buttonBarLayout = new System.Windows.Forms.TableLayoutPanel();
+        this.searchBarLayout = new System.Windows.Forms.TableLayoutPanel();
         this.labelSeriesSearch = new System.Windows.Forms.Label();
         this.txtSeriesSearch = new System.Windows.Forms.TextBox();
         this.labelSeriesFilter = new System.Windows.Forms.Label();
@@ -68,6 +78,8 @@ partial class Form1
         this.dgvEpisodes = new System.Windows.Forms.DataGridView();
         this.colEpisodeNumber = new System.Windows.Forms.DataGridViewTextBoxColumn();
         this.colEpisodeTitle = new System.Windows.Forms.DataGridViewTextBoxColumn();
+        this.colEpisodeWatchedAt = new System.Windows.Forms.DataGridViewTextBoxColumn();
+        this.colEpisodeAirdate = new System.Windows.Forms.DataGridViewTextBoxColumn();
         this.colEpisodePlay = new System.Windows.Forms.DataGridViewButtonColumn();
         this.colEpisodeMarkWatched = new System.Windows.Forms.DataGridViewButtonColumn();
         this.statusStrip = new System.Windows.Forms.StatusStrip();
@@ -163,11 +175,11 @@ partial class Form1
         this.splitContainerMain.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-        this.splitContainerMain.Location = new System.Drawing.Point(12, 60);
+        this.splitContainerMain.Location = new System.Drawing.Point(12, 100);
         this.splitContainerMain.Name = "splitContainerMain";
         this.splitContainerMain.Panel1.Controls.Add(this.dgvSeries);
         this.splitContainerMain.Panel2.Controls.Add(this.dgvEpisodes);
-        this.splitContainerMain.Size = new System.Drawing.Size(867, 534);
+        this.splitContainerMain.Size = new System.Drawing.Size(867, 494);
         this.splitContainerMain.SplitterDistance = 360;
         this.splitContainerMain.TabIndex = 11;
         // 
@@ -175,35 +187,52 @@ partial class Form1
         // 
         this.panelSeriesHeader.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-        this.panelSeriesHeader.Controls.Add(this.topBarLayout);
+        this.panelSeriesHeader.Controls.Add(this.searchBarLayout);
+        this.panelSeriesHeader.Controls.Add(this.buttonBarLayout);
         this.panelSeriesHeader.Location = new System.Drawing.Point(12, 12);
         this.panelSeriesHeader.Name = "panelSeriesHeader";
-        this.panelSeriesHeader.Size = new System.Drawing.Size(867, 40);
+        this.panelSeriesHeader.Size = new System.Drawing.Size(867, 90);
         this.panelSeriesHeader.TabIndex = 0;
         // 
-        // topBarLayout
+        // buttonBarLayout
         // 
-        this.topBarLayout.ColumnCount = 7;
-        this.topBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.topBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.topBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.topBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-        this.topBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.topBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.topBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
-        this.topBarLayout.Dock = System.Windows.Forms.DockStyle.Fill;
-        this.topBarLayout.Location = new System.Drawing.Point(0, 0);
-        this.topBarLayout.Name = "topBarLayout";
-        this.topBarLayout.RowCount = 1;
-        this.topBarLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-        this.topBarLayout.Size = new System.Drawing.Size(867, 40);
-        this.topBarLayout.TabIndex = 0;
-        this.topBarLayout.Controls.Add(this.btnSyncBangumi, 0, 0);
-        this.topBarLayout.Controls.Add(this.btnConfigureUser, 1, 0);
-        this.topBarLayout.Controls.Add(this.labelSeriesSearch, 2, 0);
-        this.topBarLayout.Controls.Add(this.txtSeriesSearch, 3, 0);
-        this.topBarLayout.Controls.Add(this.labelSeriesFilter, 4, 0);
-        this.topBarLayout.Controls.Add(this.cmbSeriesFilter, 5, 0);
+        this.buttonBarLayout.ColumnCount = 5;
+        this.buttonBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+        this.buttonBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+        this.buttonBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+        this.buttonBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+        this.buttonBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 20F));
+        this.buttonBarLayout.Controls.Add(this.btnSyncBangumi, 0, 0);
+        this.buttonBarLayout.Controls.Add(this.btnConfigureUser, 1, 0);
+        this.buttonBarLayout.Controls.Add(this.btnSetLocalFolder, 2, 0);
+        this.buttonBarLayout.Controls.Add(this.btnClearLocalFolder, 3, 0);
+        this.buttonBarLayout.Controls.Add(this.btnMatchByTitle, 4, 0);
+        this.buttonBarLayout.Dock = System.Windows.Forms.DockStyle.Top;
+        this.buttonBarLayout.Location = new System.Drawing.Point(0, 0);
+        this.buttonBarLayout.Name = "buttonBarLayout";
+        this.buttonBarLayout.RowCount = 1;
+        this.buttonBarLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
+        this.buttonBarLayout.Size = new System.Drawing.Size(867, 40);
+        this.buttonBarLayout.TabIndex = 0;
+        // 
+        // searchBarLayout
+        // 
+        this.searchBarLayout.ColumnCount = 4;
+        this.searchBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
+        this.searchBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+        this.searchBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
+        this.searchBarLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
+        this.searchBarLayout.Controls.Add(this.labelSeriesSearch, 0, 0);
+        this.searchBarLayout.Controls.Add(this.txtSeriesSearch, 1, 0);
+        this.searchBarLayout.Controls.Add(this.labelSeriesFilter, 2, 0);
+        this.searchBarLayout.Controls.Add(this.cmbSeriesFilter, 3, 0);
+        this.searchBarLayout.Dock = System.Windows.Forms.DockStyle.Top;
+        this.searchBarLayout.Location = new System.Drawing.Point(0, 40);
+        this.searchBarLayout.Name = "searchBarLayout";
+        this.searchBarLayout.RowCount = 1;
+        this.searchBarLayout.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
+        this.searchBarLayout.Size = new System.Drawing.Size(867, 40);
+        this.searchBarLayout.TabIndex = 1;
         // 
         // labelSeriesSearch
         // 
@@ -256,6 +285,39 @@ partial class Form1
         this.btnSyncBangumi.Text = "同步 Bangumi";
         this.btnSyncBangumi.UseVisualStyleBackColor = true;
         this.btnSyncBangumi.Click += new System.EventHandler(this.btnSyncBangumi_Click);
+        // 
+        // btnSetLocalFolder
+        // 
+        this.btnSetLocalFolder.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.btnSetLocalFolder.Margin = new System.Windows.Forms.Padding(0, 5, 8, 5);
+        this.btnSetLocalFolder.Name = "btnSetLocalFolder";
+        this.btnSetLocalFolder.Size = new System.Drawing.Size(108, 29);
+        this.btnSetLocalFolder.TabIndex = 7;
+        this.btnSetLocalFolder.Text = "指定本地目录";
+        this.btnSetLocalFolder.UseVisualStyleBackColor = true;
+        this.btnSetLocalFolder.Click += new System.EventHandler(this.btnSetLocalFolder_Click);
+        // 
+        // btnClearLocalFolder
+        // 
+        this.btnClearLocalFolder.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.btnClearLocalFolder.Margin = new System.Windows.Forms.Padding(0, 5, 8, 5);
+        this.btnClearLocalFolder.Name = "btnClearLocalFolder";
+        this.btnClearLocalFolder.Size = new System.Drawing.Size(108, 29);
+        this.btnClearLocalFolder.TabIndex = 8;
+        this.btnClearLocalFolder.Text = "清除本地目录";
+        this.btnClearLocalFolder.UseVisualStyleBackColor = true;
+        this.btnClearLocalFolder.Click += new System.EventHandler(this.btnClearLocalFolder_Click);
+        // 
+        // btnMatchByTitle
+        // 
+        this.btnMatchByTitle.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.btnMatchByTitle.Margin = new System.Windows.Forms.Padding(0, 5, 8, 5);
+        this.btnMatchByTitle.Name = "btnMatchByTitle";
+        this.btnMatchByTitle.Size = new System.Drawing.Size(108, 29);
+        this.btnMatchByTitle.TabIndex = 9;
+        this.btnMatchByTitle.Text = "按片名匹配目录";
+        this.btnMatchByTitle.UseVisualStyleBackColor = true;
+        this.btnMatchByTitle.Click += new System.EventHandler(this.btnMatchByTitle_Click);
         // 
         // btnConfigureUser
         // 
@@ -341,7 +403,9 @@ partial class Form1
             this.colEpisodeNumber,
             this.colEpisodeTitle,
             this.colEpisodePlay,
-            this.colEpisodeMarkWatched});
+            this.colEpisodeMarkWatched,
+            this.colEpisodeWatchedAt,
+            this.colEpisodeAirdate});
         this.dgvEpisodes.Location = new System.Drawing.Point(0, 0);
         this.dgvEpisodes.MultiSelect = false;
         this.dgvEpisodes.Name = "dgvEpisodes";
@@ -372,6 +436,24 @@ partial class Form1
         this.colEpisodeTitle.ReadOnly = true;
         this.colEpisodeTitle.DefaultCellStyle.WrapMode = System.Windows.Forms.DataGridViewTriState.True;
         this.colEpisodeTitle.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+        // 
+        // colEpisodeWatchedAt
+        // 
+        this.colEpisodeWatchedAt.DataPropertyName = "WatchedAt";
+        this.colEpisodeWatchedAt.HeaderText = "观看时间";
+        this.colEpisodeWatchedAt.MinimumWidth = 120;
+        this.colEpisodeWatchedAt.Name = "colEpisodeWatchedAt";
+        this.colEpisodeWatchedAt.ReadOnly = true;
+        this.colEpisodeWatchedAt.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.AllCells;
+        // 
+        // colEpisodeAirdate
+        // 
+        this.colEpisodeAirdate.DataPropertyName = "Airdate";
+        this.colEpisodeAirdate.HeaderText = "播出时间";
+        this.colEpisodeAirdate.MinimumWidth = 100;
+        this.colEpisodeAirdate.Name = "colEpisodeAirdate";
+        this.colEpisodeAirdate.ReadOnly = true;
+        this.colEpisodeAirdate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.AllCells;
         // 
         // colEpisodePlay
         // 
@@ -428,6 +510,19 @@ partial class Form1
         this.MinimumSize = new System.Drawing.Size(909, 612);
         this.Name = "Form1";
         this.Text = "Anime Watch Tracker";
+        // Load app.ico from output folder if present so taskbar shows the icon.
+        try
+        {
+            var iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
+            if (System.IO.File.Exists(iconPath))
+            {
+                this.Icon = new System.Drawing.Icon(iconPath);
+            }
+        }
+        catch
+        {
+            // ignore failures to load icon
+        }
         this.splitContainerMain.Panel1.ResumeLayout(false);
         this.splitContainerMain.Panel2.ResumeLayout(false);
         ((System.ComponentModel.ISupportInitialize)(this.splitContainerMain)).EndInit();
